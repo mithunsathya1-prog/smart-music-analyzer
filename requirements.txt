@@ -1,9 +1,9 @@
+streamlit
 librosa
 numpy
-scipy
-pandas
-scikit-learn
 matplotlib
-soundfile
 joblib
-streamlit
+soundfile
+plotly
+pretty_midi
+scikit-learn
