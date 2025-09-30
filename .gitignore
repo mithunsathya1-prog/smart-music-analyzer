@@ -20,3 +20,5 @@ C:/temp_audio/
 # OS files
 .DS_Store
 Thumbs.db
+# Ignore generated stems
+stems_output/
