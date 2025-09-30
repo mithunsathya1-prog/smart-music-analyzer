@@ -15,5 +15,5 @@ Smart Music Analyzer is an interactive web app that analyzes audio files to prov
 The app is built with Python, Streamlit, and librosa, leveraging ML models for genre prediction and advanced audio processing techniques for musical feature extraction. It allows users to upload their own songs and explore their musical characteristics in an intuitive interface.
 
  Try it Live
-[Streamlit App[](https://smart-music-analyzer-j5cx5wueyeqgq4hswvrsyk.streamlit.app/)]
+[Streamlit App[(https://smart-music-analyzer-j5cx5wueyeqgq4hswvrsyk.streamlit.app/)]
 
