@@ -30,18 +30,14 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 def split_audio(input_file: str, output_dir: str = "stems_output", karaoke=False):
     os.makedirs(output_dir, exist_ok=True)
     input_path = Path(input_file).resolve()
-
-    # Copy to safe path to avoid spaces
     safe_file = TEMP_DIR / input_path.name
     shutil.copy(input_path, safe_file)
 
-    # Demucs command
     cmd = ["demucs", "-n", "htdemucs", "-o", output_dir, str(safe_file)]
     if karaoke:
         cmd = ["demucs", "-n", "htdemucs", "--two-stems=vocals", "-o", output_dir, str(safe_file)]
 
-    subprocess.run(cmd, check=True, shell=True)
-
+    subprocess.run(cmd, check=True)
     model_dir = os.listdir(output_dir)[0]
     song_name = safe_file.stem
     result_path = os.path.join(output_dir, model_dir, song_name)
@@ -49,14 +45,12 @@ def split_audio(input_file: str, output_dir: str = "stems_output", karaoke=False
 
 # --- Helper: Save audio temporarily in high quality ---
 def save_temp_audio(y, sr):
-    # Ensure 2D array for stereo
-    if y.ndim == 1:
-        y_out = y
+    if y.ndim == 2:  # stereo
+        y_out = y.T.astype(np.float32)
     else:
-        y_out = y.T
-    y_out = y_out.astype(np.float32)
+        y_out = y.astype(np.float32)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        sf.write(tmp.name, y_out, sr, subtype='PCM_16')
+        sf.write(tmp.name, y_out, sr, subtype='PCM_24')
         return tmp.name
 
 # --- Lyrics generation function using OpenAI Whisper ---
@@ -69,7 +63,7 @@ def generate_lyrics(audio_path):
 
     model = whisper.load_model("tiny")  # CPU friendly
     result = model.transcribe(audio_path)
-    text = result['text']
+    text = result.get('text', '')
 
     # Split into stanzas (roughly every 4 lines)
     lines = text.split('\n')
@@ -148,14 +142,19 @@ if uploaded_file:
     prediction = clf.predict(features_scaled)
     genre = le.inverse_transform(prediction)[0]
 
-    # --- Tempo & Time Signature (Safe) ---
+    # --- Tempo & Time Signature ---
     tempo, beat_frames = librosa.beat.beat_track(y=y_mono, sr=sr)
-    if tempo is None or np.isnan(tempo) or tempo <= 0:
-        tempo = 120.0  # default BPM fallback
-
     beats_sec = librosa.frames_to_time(beat_frames, sr=sr)
     avg_interval = np.mean(np.diff(beats_sec)) if len(beats_sec) > 1 else 0
-    beats_per_bar = round(4 * (60 / tempo) / avg_interval) if avg_interval > 0 else 4
+
+    try:
+        if avg_interval > 0 and tempo > 0:
+            beats_per_bar = round(4 * (60 / tempo) / avg_interval)
+        else:
+            beats_per_bar = 4
+    except Exception as e:
+        st.warning(f"Could not calculate beats per bar: {e}")
+        beats_per_bar = 4
     time_signature = f"{beats_per_bar}/4"
 
     # --- Key / Scale estimation ---
@@ -182,7 +181,6 @@ if uploaded_file:
                 stems_path = split_audio(tmp_orig_path, karaoke=(split_mode == "Karaoke (Remove Vocals)"))
                 st.success("Stems created!")
 
-                # Display and download stems
                 for stem_file in os.listdir(stems_path):
                     stem_full_path = os.path.join(stems_path, stem_file)
                     st.write(f"**{stem_file}**")
