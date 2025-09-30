@@ -7,5 +7,3 @@ soundfile
 plotly
 pretty_midi
 scikit-learn
-openai-whisper   # For lyrics generation
-ffmpeg-python    # Required for whisper and audio processing

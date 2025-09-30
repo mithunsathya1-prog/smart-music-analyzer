@@ -22,3 +22,4 @@ C:/temp_audio/
 Thumbs.db
 # Ignore generated stems
 stems_output/
+"stems_output/" 
