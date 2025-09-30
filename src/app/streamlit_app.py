@@ -10,7 +10,6 @@ import os
 import subprocess
 from pathlib import Path
 import shutil
-import whisper
 
 # --- Load model, label encoder, and scaler ---
 MODEL_PATH = 'models/best_baseline.pkl'
@@ -23,18 +22,9 @@ scaler = joblib.load(SCALER_PATH)
 
 st.title("🎵 Smart Music Analyzer")
 
-# --- Create a safe temp folder for Windows paths ---
-TEMP_DIR = Path("C:/temp_audio")
-TEMP_DIR.mkdir(exist_ok=True)
-
-# --- Helper: Save audio temporarily in high quality ---
-def save_temp_audio(y, sr):
-    if y.ndim == 2:  # stereo
-        y = y.T
-    y = y.astype(np.float32)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        sf.write(tmp.name, y, sr, subtype='PCM_24')
-        return tmp.name
+# --- Create a cross-platform temporary folder ---
+TEMP_DIR = Path(tempfile.gettempdir()) / "temp_audio"
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Stem splitting function ---
 def split_audio(input_file: str, output_dir: str = "stems_output", karaoke=False):
@@ -57,36 +47,41 @@ def split_audio(input_file: str, output_dir: str = "stems_output", karaoke=False
     result_path = os.path.join(output_dir, model_dir, song_name)
     return result_path
 
-# --- Lyrics generation (stanza-wise) ---
-def generate_lyrics(audio_path, chunk_length_sec=30, overlap_sec=2):
-    # Load and convert to mono
-    y, sr = librosa.load(audio_path, sr=None)
-    y_mono = librosa.to_mono(y)
+# --- Helper: Save audio temporarily in high quality ---
+def save_temp_audio(y, sr):
+    if y.ndim == 2:  # stereo
+        y = y.T
+    y = y.astype(np.float32)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        sf.write(tmp.name, y, sr, subtype='PCM_24')
+        return tmp.name
 
-    # Trim silence
-    y_trimmed, _ = librosa.effects.trim(y_mono, top_db=20)
-    tmp_trimmed_path = save_temp_audio(y_trimmed, sr)
+# --- Lyrics generation function using OpenAI Whisper (CPU compatible) ---
+def generate_lyrics(audio_path):
+    try:
+        import whisper
+    except ModuleNotFoundError:
+        st.error("Whisper not installed. Please install `whisper` to enable lyrics generation.")
+        return ""
 
-    # Load Whisper model on CPU
-    whisper_model = whisper.load_model("base", device="cpu")  # tiny/base for CPU
+    model = whisper.load_model("tiny")  # CPU friendly
+    result = model.transcribe(audio_path)
+    text = result['text']
 
-    lyrics_stanzas = []
-    total_samples = len(y_trimmed)
-    chunk_samples = int(chunk_length_sec * sr)
-    overlap_samples = int(overlap_sec * sr)
-    start = 0
-
-    while start < total_samples:
-        end = min(start + chunk_samples, total_samples)
-        y_chunk = y_trimmed[start:end]
-        tmp_chunk_path = save_temp_audio(y_chunk, sr)
-        result = whisper_model.transcribe(tmp_chunk_path, language="en", fp16=False)
-        stanza = result["text"].strip()
-        if stanza:
-            lyrics_stanzas.append(stanza)
-        start += chunk_samples - overlap_samples  # move with overlap
-
-    return "\n\n".join(lyrics_stanzas)
+    # Split into stanzas (roughly every 4 lines)
+    lines = text.split('\n')
+    stanzas = []
+    stanza = []
+    for i, line in enumerate(lines):
+        if line.strip() == "":
+            continue
+        stanza.append(line.strip())
+        if len(stanza) == 4:
+            stanzas.append('\n'.join(stanza))
+            stanza = []
+    if stanza:
+        stanzas.append('\n'.join(stanza))
+    return stanzas
 
 # --- File uploader ---
 uploaded_file = st.file_uploader("Upload a WAV/MP3 file", type=["wav", "mp3"])
@@ -123,7 +118,7 @@ if uploaded_file:
 
     # --- Waveform visualization ---
     st.subheader("Waveform")
-    downsample_factor = max(1, y_shifted.shape[-1]//5000)
+    downsample_factor = max(1, y_shifted.shape[-1] // 5000)
     times = np.arange(0, y_shifted.shape[-1], downsample_factor) / sr
     y_plot = y_shifted[..., ::downsample_factor] if y_shifted.ndim == 2 else y_shifted[::downsample_factor]
 
@@ -193,15 +188,16 @@ if uploaded_file:
             except Exception as e:
                 st.error(f"Stem splitting failed: {e}")
 
-    # --- Lyrics generation ---
+    # --- Lyrics Generation ---
+    st.subheader("Lyrics Generation")
     if st.button("Generate Lyrics"):
         with st.spinner("Generating lyrics..."):
-            try:
-                lyrics = generate_lyrics(tmp_orig_path)
-                st.subheader("Generated Lyrics (Stanza-wise)")
-                st.text_area("Lyrics", lyrics, height=400)
-            except Exception as e:
-                st.error(f"Lyrics generation failed: {e}")
+            stanzas = generate_lyrics(tmp_orig_path)
+            if stanzas:
+                for i, stanza in enumerate(stanzas, 1):
+                    st.markdown(f"**Stanza {i}:**\n{stanza}")
+            else:
+                st.write("No lyrics generated or Whisper not installed.")
 
     # --- Cleanup temporary files ---
     for f_path in [tmp_orig_path, tmp_adjusted_path]:
