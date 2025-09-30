@@ -49,30 +49,31 @@ def split_audio(input_file: str, output_dir: str = "stems_output", karaoke=False
 
 # --- Helper: Save audio temporarily in high quality ---
 def save_temp_audio(y, sr):
-    if y.ndim == 2:  # stereo
-        y = y.T
-    y = y.astype(np.float32)
+    if y.ndim == 1:  # mono
+        y_out = y
+    else:  # stereo
+        y_out = y.T
+    y_out = y_out.astype(np.float32)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        sf.write(tmp.name, y, sr, subtype='PCM_24')
+        sf.write(tmp.name, y_out, sr, subtype='PCM_24')
         return tmp.name
 
-# --- Lyrics generation function using OpenAI Whisper (CPU compatible) ---
+# --- Lyrics generation function ---
 def generate_lyrics(audio_path):
     try:
         import whisper
     except ModuleNotFoundError:
         st.error("Whisper not installed. Please install `whisper` to enable lyrics generation.")
-        return ""
+        return []
 
     model = whisper.load_model("tiny")  # CPU friendly
     result = model.transcribe(audio_path)
     text = result['text']
 
-    # Split into stanzas (roughly every 4 lines)
     lines = text.split('\n')
     stanzas = []
     stanza = []
-    for i, line in enumerate(lines):
+    for line in lines:
         if line.strip() == "":
             continue
         stanza.append(line.strip())
@@ -93,8 +94,9 @@ if uploaded_file:
         tmp_orig.flush()
         tmp_orig_path = tmp_orig.name
 
-    # Load audio
-    y, sr = librosa.load(tmp_orig_path, sr=None, mono=False)
+    # --- Load audio (keep stereo) ---
+    data, sr = sf.read(tmp_orig_path)
+    y = data  # keep stereo if exists
 
     # --- Original audio playback ---
     st.subheader("Original Audio")
@@ -102,11 +104,17 @@ if uploaded_file:
 
     # --- Tempo adjustment ---
     tempo_factor = st.slider("Adjust Playback Speed (Tempo)", 0.5, 1.5, 1.0, 0.05)
-    y_speed = librosa.effects.time_stretch(y, rate=tempo_factor)
+    if y.ndim == 1:
+        y_speed = librosa.effects.time_stretch(y, rate=tempo_factor)
+    else:
+        y_speed = np.array([librosa.effects.time_stretch(y[:, i], rate=tempo_factor) for i in range(y.shape[1])]).T
 
     # --- Pitch adjustment ---
     pitch_shift = st.slider("Adjust Pitch (Semitones)", -12, 12, 0, 1)
-    y_shifted = librosa.effects.pitch_shift(y_speed, sr=sr, n_steps=pitch_shift)
+    if y_speed.ndim == 1:
+        y_shifted = librosa.effects.pitch_shift(y_speed, sr=sr, n_steps=pitch_shift)
+    else:
+        y_shifted = np.array([librosa.effects.pitch_shift(y_speed[:, i], sr=sr, n_steps=pitch_shift) for i in range(y_speed.shape[1])]).T
 
     # Normalize
     y_shifted = y_shifted / np.max(np.abs(y_shifted))
@@ -118,21 +126,22 @@ if uploaded_file:
 
     # --- Waveform visualization ---
     st.subheader("Waveform")
-    downsample_factor = max(1, y_shifted.shape[-1] // 5000)
-    times = np.arange(0, y_shifted.shape[-1], downsample_factor) / sr
-    y_plot = y_shifted[..., ::downsample_factor] if y_shifted.ndim == 2 else y_shifted[::downsample_factor]
+    downsample_factor = max(1, y_shifted.shape[0] // 5000 if y_shifted.ndim == 1 else y_shifted.shape[0] // 5000)
+    times = np.arange(0, y_shifted.shape[0], downsample_factor) / sr
 
     fig_wave = go.Figure()
-    if y_shifted.ndim == 2:
-        fig_wave.add_trace(go.Scatter(x=times, y=y_plot[0], mode='lines', name='Left', line=dict(color='royalblue')))
-        fig_wave.add_trace(go.Scatter(x=times, y=y_plot[1], mode='lines', name='Right', line=dict(color='orange')))
-    else:
+    if y_shifted.ndim == 1:
+        y_plot = y_shifted[::downsample_factor]
         fig_wave.add_trace(go.Scatter(x=times, y=y_plot, mode='lines', line=dict(color='royalblue')))
+    else:
+        y_plot = y_shifted[::downsample_factor, :]
+        fig_wave.add_trace(go.Scatter(x=times, y=y_plot[:, 0], mode='lines', name='Left', line=dict(color='royalblue')))
+        fig_wave.add_trace(go.Scatter(x=times, y=y_plot[:, 1], mode='lines', name='Right', line=dict(color='orange')))
     fig_wave.update_layout(xaxis_title="Time (s)", yaxis_title="Amplitude", height=300)
     st.plotly_chart(fig_wave, use_container_width=True)
 
-    # --- Feature extraction for genre prediction ---
-    y_mono = librosa.to_mono(y_shifted) if y_shifted.ndim == 2 else y_shifted
+    # --- Feature extraction for genre prediction (mono) ---
+    y_mono = y_shifted if y_shifted.ndim == 1 else np.mean(y_shifted, axis=1)
     mfccs = librosa.feature.mfcc(y=y_mono, sr=sr, n_mfcc=13)
     mfccs_mean = np.mean(mfccs, axis=1)
     chroma = librosa.feature.chroma_stft(y=y_mono, sr=sr)
