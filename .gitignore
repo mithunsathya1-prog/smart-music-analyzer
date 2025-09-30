@@ -1,1 +1,22 @@
-"stems_output/" 
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+smanalyzer_env/
+
+# Audio outputs
+stems_output/
+C:/temp_audio/
+
+# IDE files
+.vscode/
+*.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
