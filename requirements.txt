@@ -7,3 +7,4 @@ soundfile
 plotly
 pretty_midi
 scikit-learn
+openai-whisper
