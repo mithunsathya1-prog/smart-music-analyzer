@@ -1,18 +1,11 @@
-# Streamlit app
 streamlit==1.29.0
-
-# Core ML/audio dependencies
-numpy>=1.27,<2.0
+numpy
 scipy
 pandas
 librosa
 matplotlib
 scikit-learn
 soundfile
-
-# Whisper for transcription
 openai-whisper @ git+https://github.com/openai/whisper.git
-
-# Packaging utilities
 setuptools==80.9.0
 wheel==0.45.1
